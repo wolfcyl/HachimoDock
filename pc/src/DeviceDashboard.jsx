@@ -63,6 +63,7 @@ import RealtimeChatPanel, { realtimeStateLabel } from "./dashboard/RealtimeChatP
 import { isRecoveringAsr, realtimeErrorMessage } from "./lib/realtime-feedback.js";
 import { pollWhileVisible } from "./lib/visible-poll.js";
 import { agentSessionFeedFresh, P4_SESSION_EVENT_POLL_MS, useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
+import { mergeCompanionDeviceSessions, useCompanionDeviceSessions } from "./dashboard/useCompanionDeviceSessions.js";
 import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
 import { subscribeAsrCredentialUpdates } from "./dashboard/voice-credential-events.js";
 import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
@@ -1055,6 +1056,14 @@ export default function DeviceDashboard({ active = true, keyboardActive = false,
     displayEnabled: true,
     dismissedSessions: dismissedP4Sessions,
   });
+  const companionSessions = useCompanionDeviceSessions({
+    selectedAgentId,
+    enabled: isP4Runtime,
+  });
+  const deviceVisibleSessions = useMemo(
+    () => mergeCompanionDeviceSessions(sessionFeed.sessions, companionSessions.sessions),
+    [companionSessions.sessions, sessionFeed.sessions],
+  );
   const p4SessionSync = useP4SessionSync({
     enabled: isP4Runtime,
     boardDeviceId: p4TargetBoardDeviceId,
@@ -1063,7 +1072,7 @@ export default function DeviceDashboard({ active = true, keyboardActive = false,
     usbConnectionId: usb.connectionId,
     usbBootId: usb.bootId || usb.capabilities?.debugBootId || "",
     displayEnabled: true,
-    sessions: sessionFeed.sessions,
+    sessions: deviceVisibleSessions,
     routingSessions: sessionFeed.routingSessions,
     sessionsLoaded: sessionFeed.loaded,
     dismissedSessions: dismissedP4Sessions,

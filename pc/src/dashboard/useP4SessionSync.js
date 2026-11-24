@@ -152,17 +152,21 @@ export function useP4SessionSync({
     () => displayEnabled ? visibleSessions : [],
     [displayEnabled, visibleSessions],
   );
-  const switchCandidates = selectableSessions;
+  const voiceSessions = useMemo(
+    () => selectableSessions.filter((session) => session?.deviceCompanion !== true),
+    [selectableSessions],
+  );
+  const switchCandidates = voiceSessions;
   const explicitDshSessionRequired = agentId === "deepseek-harness" && (!sessionId || sessionId === "auto");
-  const autoRoutingSession = explicitDshSessionRequired ? null : selectableSessions[0] || routingSessions?.[0] || sessions?.[0];
+  const autoRoutingSession = explicitDshSessionRequired ? null : voiceSessions[0] || routingSessions?.[0] || sessions?.find((session) => session?.deviceCompanion !== true);
   const selectedRoutingSession = (sessionId === "auto"
     ? autoRoutingSession
     : (routingSessions || []).find(
       (session) => normalizeText(session?.id) === normalizeText(sessionId),
     )) || null;
   const selectedVisibleSession = sessionId === "auto"
-    ? (explicitDshSessionRequired ? null : selectableSessions[0] || null)
-    : selectableSessions.find(
+    ? (explicitDshSessionRequired ? null : voiceSessions[0] || null)
+    : voiceSessions.find(
       (session) => normalizeText(session?.id) === normalizeText(sessionId),
     ) || null;
   const selectedTargetSession = selectedRoutingSession || selectedVisibleSession;

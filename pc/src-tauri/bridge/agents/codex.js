@@ -7,8 +7,8 @@
  * [Sync] If Codex log discovery changes, update `pc/.folder.md`.
  */
 
-const os = require("os");
 const path = require("path");
+const { selectCodexDataDir } = require("./codex-home");
 
 const POLL_INTERVAL_MS = 1500;
 const DISCOVERY_INTERVAL_MS = process.platform === "win32" ? 30000 : POLL_INTERVAL_MS;
@@ -21,7 +21,7 @@ function envPath(name) {
 function resolveCodexHome() {
   const codexHome = envPath("CLAWD_CODEX_HOME") || envPath("CODEX_HOME");
   if (codexHome) return codexHome;
-  return path.join(os.homedir(), ".codex");
+  return selectCodexDataDir();
 }
 
 function resolveSessionDir() {

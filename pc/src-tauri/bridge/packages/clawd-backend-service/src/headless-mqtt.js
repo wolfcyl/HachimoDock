@@ -2173,6 +2173,10 @@ function publishAntigravityState(publisher, sessionId, state, event, extra, tsMs
   }, sourceOnly);
 }
 
+function localAgentStateSyncEnabled() {
+  return getEnvBool("CLAWD_SYNC_LOCAL_AGENT_STATE", false);
+}
+
 function resolveConfig() {
   const defaultDeviceId = normalizeTopicPart(os.hostname().toLowerCase(), "devbox");
   const stateDirFallback = path.join(os.homedir(), ".status-bridge");
@@ -2203,13 +2207,13 @@ function resolveConfig() {
       mockButtonTimeoutMs: Math.max(2000, getEnvInt("CLAWD_MOCK_BUTTON_TIMEOUT_MS", 120000)),
     },
     codex: {
-      enabled: getEnvBool("CLAWD_ENABLE_CODEX_MONITOR", true),
+      enabled: getEnvBool("CLAWD_ENABLE_CODEX_MONITOR", true) || localAgentStateSyncEnabled(),
     },
     claude: {
-      enabledLogMonitor: getEnvBool("CLAWD_ENABLE_CLAUDE_LOG_MONITOR", true),
+      enabledLogMonitor: getEnvBool("CLAWD_ENABLE_CLAUDE_LOG_MONITOR", true) || localAgentStateSyncEnabled(),
     },
     openclaw: {
-      enabled: getEnvBool("OPENCLAW_ENABLE", true),
+      enabled: getEnvBool("OPENCLAW_ENABLE", true) || localAgentStateSyncEnabled(),
       gatewayUrl: getEnv("OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18789"),
       token: getEnv("OPENCLAW_GATEWAY_TOKEN", ""),
       password: getEnv("OPENCLAW_GATEWAY_PASSWORD", ""),
@@ -2235,19 +2239,23 @@ function resolveConfig() {
       ),
     },
     mimocode: {
-      enabled: getEnvBool("CLAWD_ENABLE_MIMOCODE", true),
+      enabled: getEnvBool("CLAWD_ENABLE_MIMOCODE", true) || localAgentStateSyncEnabled(),
     },
     antigravity: { enabled: antigravityMonitorEnabled() },
     hermes: {
-      enabled: parseCsvEnv("CLAWD_ENABLED_AGENTS", []).includes("hermes")
+      enabled: localAgentStateSyncEnabled()
+        || parseCsvEnv("CLAWD_ENABLED_AGENTS", []).includes("hermes")
         || getEnv("CLAWD_SELECTED_AGENT_ID", "") === "hermes",
     },
     dsh: {
-      enabled: require("../../../agents/dsh-status-monitor").isDshFollowEnabled(),
+      enabled: localAgentStateSyncEnabled()
+        || require("../../../agents/dsh-status-monitor").isDshFollowEnabled(),
     },
     workbuddy: {
       // Selected/enabled channel is authoritative in both direct and autostart launches.
-      enabled: parseCsvEnv("CLAWD_ENABLED_AGENTS", []).includes("workbuddy")
+      // Local state sync still observes WorkBuddy while another Agent is followed.
+      enabled: localAgentStateSyncEnabled()
+        || parseCsvEnv("CLAWD_ENABLED_AGENTS", []).includes("workbuddy")
         || getEnv("CLAWD_SELECTED_AGENT_ID", "") === "workbuddy",
     },
     devin: {

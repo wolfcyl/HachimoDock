@@ -3197,6 +3197,17 @@ fn usb_session_binding_allows(
     source == binding.agent_id && session_id == binding.session_id
 }
 
+fn usb_device_state_binding_allows(
+    board_device_id: &str,
+    source: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    match p4_session_binding_for_board(board_device_id) {
+        Some(binding) => usb_display_payload_matches_binding(&binding, source, payload),
+        None => true,
+    }
+}
+
 fn resolve_usb_inject_target(board_device_id: &str) -> (String, String) {
     if let Some(binding) = p4_session_binding_for_board(board_device_id) {
         // A board connection can publish a binding row before the agent sync
@@ -11712,12 +11723,16 @@ fn disabled_usb_sources_for_filter(
     }
 
     for source in previous_enabled_agents.difference(next_enabled_agents) {
+        if usb_local_state_source(source) {
+            continue;
+        }
         disabled_sources.insert(source.clone());
     }
     for source in KNOWN_USB_STATE_SOURCES {
-        if !next_enabled_agents.contains(source) {
-            disabled_sources.insert(source.to_string());
+        if usb_local_state_source(source) || next_enabled_agents.contains(source) {
+            continue;
         }
+        disabled_sources.insert(source.to_string());
     }
 
     disabled_sources
@@ -11820,6 +11835,51 @@ fn usb_source_allowed_by_follow(
         return source == selected;
     }
     source != "antigravity" && (enabled_agents.is_empty() || enabled_agents.contains(source))
+}
+
+fn usb_local_state_source(source: &str) -> bool {
+    matches!(
+        source,
+        "claude-code"
+            | "codex"
+            | "openclaw"
+            | "mimocode"
+            | "deepseek-harness"
+            | "workbuddy"
+            | "hermes"
+            | "cursor-agent"
+    )
+}
+
+/// Device state may include every local Agent. The selected Agent still owns
+/// voice routing, and Antigravity stays off until it is explicitly followed.
+fn usb_source_allowed_for_device_state(
+    source: &str,
+    selected_agent: &Option<String>,
+    enabled_agents: &HashSet<String>,
+) -> bool {
+    if source == "antigravity" {
+        return selected_agent.as_deref() == Some(source);
+    }
+    usb_source_allowed_by_follow(source, selected_agent, enabled_agents)
+        || usb_local_state_source(source)
+}
+
+fn usb_display_payload_matches_binding(
+    binding: &P4SessionBinding,
+    source: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    let source = normalize_agent_id(source).unwrap_or_else(|| source.trim().to_ascii_lowercase());
+    if source != binding.agent_id {
+        return true;
+    }
+    let session_id = payload
+        .get("sessionId")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default();
+    session_id == binding.session_id
 }
 
 fn score_usb_state(state: &str) -> i32 {
@@ -12010,7 +12070,7 @@ fn pick_best_usb_bridge_state(
     exclude_speaking: bool,
     board_device_id: &str,
 ) -> Option<(String, serde_json::Value)> {
-    pick_best_bridge_state(exclude_speaking, |source,payload| usb_session_binding_allows(board_device_id,source,payload))
+    pick_best_bridge_state(exclude_speaking, |source,payload| usb_device_state_binding_allows(board_device_id,source,payload))
 }
 fn pick_best_bridge_state(exclude_speaking:bool, allows:impl Fn(&str,&serde_json::Value)->bool)->Option<(String,serde_json::Value)>{
     let tmp = env::var("TMPDIR")
@@ -12034,7 +12094,7 @@ fn pick_best_bridge_state(exclude_speaking:bool, allows:impl Fn(&str,&serde_json
             None => continue,
         };
         let source = usb_state_source_from_file_stem(raw_source);
-        if !usb_source_allowed_by_follow(&source, &selected_agent, &enabled_agents) {
+        if !usb_source_allowed_for_device_state(&source, &selected_agent, &enabled_agents) {
             continue;
         }
 
@@ -12515,7 +12575,7 @@ fn start_usb_state_forwarder(usb_manager: usb_serial::UsbSerialManager) {
                     None => continue,
                 };
                 let source = usb_state_source_from_file_stem(raw_source);
-                if !usb_source_allowed_by_follow(&source, &selected_agent, &enabled_agents) {
+                if !usb_source_allowed_for_device_state(&source, &selected_agent, &enabled_agents) {
                     continue;
                 }
                 let content = match fs::read_to_string(&path) {
@@ -12540,7 +12600,7 @@ fn start_usb_state_forwarder(usb_manager: usb_serial::UsbSerialManager) {
                             best_stats_ts_ms = ts_ms;
                         }
                     }
-                    if !usb_session_binding_allows(&status.board_device_id, &source, &payload) {
+                    if !usb_device_state_binding_allows(&status.board_device_id, &source, &payload) {
                         continue;
                     }
 
@@ -13807,7 +13867,7 @@ fn write_launch_script(
         shell_quote(&DEFAULT_BRIDGE_PORT.to_string())
     );
     let script = format!(
-        "#!/bin/sh\nset -eu\nunset NODE_OPTIONS\nmkdir -p {logs_dir}\nBRIDGE_ROOT=''\nfor candidate in {bridge_root_candidates}; do\n  if [ -f \"$candidate/{entry_relative_path}\" ]; then\n    BRIDGE_ROOT=\"$candidate\"\n    break\n  fi\ndone\nif [ -z \"$BRIDGE_ROOT\" ]; then\n  printf '%s\\n' 'bridge resources not found in any detected local path' >> {log_path}\n  exit 1\nfi\ncd \"$BRIDGE_ROOT/{workspace_relative_path}\"\nexport PATH={search_path}\nexport NODE_PATH=\"$BRIDGE_ROOT/{workspace_relative_path}/node_modules${{NODE_PATH:+:$NODE_PATH}}\"\n{codex_cli_export}{claude_cli_export}export MQTT_URL={mqtt_url}\nexport MQTT_USERNAME={mqtt_username}\nexport MQTT_PASSWORD={mqtt_password}\nexport STATUS_NAMESPACE={namespace}\nexport STATUS_DEVICE_ID={device_id}\nexport STATUS_BRIDGE_LOCAL_STATE_DIR={local_state_dir}\nexport CLAWD_BRIDGE_PORT={bridge_port}\nexport AGENT_BUS_PORT={agent_bus_port}\nexport PET_MANAGER_MANAGED_BRIDGE=1\nexport CLAWD_ENABLED_AGENTS={enabled_agents}\nexport CLAWD_SELECTED_AGENT_ID={selected_agent_id}\nexport CLAWD_ENABLE_ANTIGRAVITY_MONITOR={antigravity_enabled}\nexport CLAWD_DEVIN_CLOUD_ENABLED={devin_cloud_enabled}\nexport CLAWD_ENABLE_CLAUDE_LOG_MONITOR={claude_enabled}\nexport CLAWD_SYNC_HOOKS={claude_enabled}\nexport CLAWD_ENABLE_CODEX_MONITOR={codex_enabled}\nexport CLAWD_CODEX_SESSION_DIR={codex_session_dir}\nexport OPENCLAW_ENABLE={openclaw_enabled}\nexport CLAWD_ENABLE_MIMOCODE={mimocode_enabled}\nexec {node_path} \"$BRIDGE_ROOT/{entry_relative_path}\" >> {log_path} 2>&1\n",
+        "#!/bin/sh\nset -eu\nunset NODE_OPTIONS\nmkdir -p {logs_dir}\nBRIDGE_ROOT=''\nfor candidate in {bridge_root_candidates}; do\n  if [ -f \"$candidate/{entry_relative_path}\" ]; then\n    BRIDGE_ROOT=\"$candidate\"\n    break\n  fi\ndone\nif [ -z \"$BRIDGE_ROOT\" ]; then\n  printf '%s\\n' 'bridge resources not found in any detected local path' >> {log_path}\n  exit 1\nfi\ncd \"$BRIDGE_ROOT/{workspace_relative_path}\"\nexport PATH={search_path}\nexport NODE_PATH=\"$BRIDGE_ROOT/{workspace_relative_path}/node_modules${{NODE_PATH:+:$NODE_PATH}}\"\n{codex_cli_export}{claude_cli_export}export MQTT_URL={mqtt_url}\nexport MQTT_USERNAME={mqtt_username}\nexport MQTT_PASSWORD={mqtt_password}\nexport STATUS_NAMESPACE={namespace}\nexport STATUS_DEVICE_ID={device_id}\nexport STATUS_BRIDGE_LOCAL_STATE_DIR={local_state_dir}\nexport CLAWD_BRIDGE_PORT={bridge_port}\nexport AGENT_BUS_PORT={agent_bus_port}\nexport PET_MANAGER_MANAGED_BRIDGE=1\nexport CLAWD_ENABLED_AGENTS={enabled_agents}\nexport CLAWD_SELECTED_AGENT_ID={selected_agent_id}\nexport CLAWD_SYNC_LOCAL_AGENT_STATE=true\nexport CLAWD_ENABLE_ANTIGRAVITY_MONITOR={antigravity_enabled}\nexport CLAWD_DEVIN_CLOUD_ENABLED={devin_cloud_enabled}\nexport CLAWD_ENABLE_CLAUDE_LOG_MONITOR={claude_enabled}\nexport CLAWD_SYNC_HOOKS={claude_enabled}\nexport CLAWD_ENABLE_CODEX_MONITOR={codex_enabled}\nexport CLAWD_CODEX_SESSION_DIR={codex_session_dir}\nexport OPENCLAW_ENABLE={openclaw_enabled}\nexport CLAWD_ENABLE_MIMOCODE={mimocode_enabled}\nexec {node_path} \"$BRIDGE_ROOT/{entry_relative_path}\" >> {log_path} 2>&1\n",
         logs_dir = shell_quote(
             log_path
                 .parent()
@@ -13980,6 +14040,7 @@ $env:AGENT_BUS_PORT = {agent_bus_port}\r\n\
 $env:PET_MANAGER_MANAGED_BRIDGE = '1'\r\n\
 $env:CLAWD_ENABLED_AGENTS = {enabled_agents}\r\n\
 $env:CLAWD_SELECTED_AGENT_ID = {selected_agent_id}\r\n\
+$env:CLAWD_SYNC_LOCAL_AGENT_STATE = 'true'\r\n\
 $env:CLAWD_ENABLE_ANTIGRAVITY_MONITOR = {antigravity_enabled}\r\n\
 $env:CLAWD_DEVIN_CLOUD_ENABLED = {devin_cloud_enabled}\r\n\
 $env:CLAWD_ENABLE_CLAUDE_LOG_MONITOR = {claude_enabled}\r\n\
@@ -14294,6 +14355,7 @@ fn start_bridge_direct(
     command.env("AGENT_BUS_PORT", DEFAULT_AGENT_BUS_PORT.to_string());
     command.env("CLAWD_ENABLED_AGENTS", enabled_agents_csv(profile));
     command.env("CLAWD_SELECTED_AGENT_ID", &profile.selected_agent_id);
+    command.env("CLAWD_SYNC_LOCAL_AGENT_STATE", "true");
     command.env("CLAWD_ENABLE_ANTIGRAVITY_MONITOR", antigravity_monitor_enabled_env(profile));
     command.env(
         "CLAWD_DEVIN_CLOUD_ENABLED",
@@ -16590,6 +16652,59 @@ mod tests {
     }
 
     #[test]
+    fn device_state_includes_other_local_agents_while_voice_follow_stays_single() {
+        let enabled = HashSet::from(["cursor-agent".to_string()]);
+        let selected = Some("cursor-agent".to_string());
+        assert!(usb_source_allowed_for_device_state(
+            "cursor-agent",
+            &selected,
+            &enabled
+        ));
+        assert!(usb_source_allowed_for_device_state(
+            "codex",
+            &selected,
+            &enabled
+        ));
+        assert!(usb_source_allowed_for_device_state(
+            "claude-code",
+            &selected,
+            &enabled
+        ));
+        assert!(!usb_source_allowed_for_device_state(
+            "antigravity",
+            &selected,
+            &enabled
+        ));
+        assert!(!usb_source_allowed_for_device_state(
+            "devin",
+            &selected,
+            &enabled
+        ));
+        assert!(!usb_source_allowed_by_follow("codex", &selected, &enabled));
+
+        let binding = P4SessionBinding {
+            agent_id: "cursor-agent".into(),
+            session_id: "bound".into(),
+            ..P4SessionBinding::default()
+        };
+        let other = serde_json::json!({ "sessionId": "other", "state": "working" });
+        let bound = serde_json::json!({ "sessionId": "bound", "state": "idle" });
+        assert!(usb_display_payload_matches_binding(
+            &binding, "codex", &other
+        ));
+        assert!(!usb_display_payload_matches_binding(
+            &binding,
+            "cursor-agent",
+            &other
+        ));
+        assert!(usb_display_payload_matches_binding(
+            &binding,
+            "cursor-agent",
+            &bound
+        ));
+    }
+
+    #[test]
     fn antigravity_requires_explicit_follow_and_can_switch_back() {
         let enabled = HashSet::from(["antigravity".to_string()]);
         let fallback = normalize_bridge_profile(BridgeProfileFile {
@@ -16938,19 +17053,7 @@ mod tests {
             .collect();
         disabled.sort();
 
-        assert_eq!(
-            disabled,
-            vec![
-                "codex".to_string(),
-                "cursor-agent".to_string(),
-                "deepseek-harness".to_string(),
-                "devin".to_string(),
-                "hermes".to_string(),
-                "mimocode".to_string(),
-                "openclaw".to_string(),
-                "workbuddy".to_string()
-            ]
-        );
+        assert_eq!(disabled, vec!["devin".to_string()]);
     }
 
     #[test]

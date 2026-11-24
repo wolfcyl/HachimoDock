@@ -96,7 +96,7 @@ test("current-Agent P4 session visibility is always on and follows adjacent snap
   assert.doesNotMatch(source, /p4SessionDisplayLimit/);
   assert.doesNotMatch(source, /selectedAgentId === "codex"\s*\?\s*\(sessionDisplayEnabled/);
   assert.match(sessionSync, /displayEnabled \? visibleSessions : \[\]/);
-  assert.match(sessionSync, /const switchCandidates = selectableSessions/);
+  assert.match(sessionSync, /const switchCandidates = voiceSessions/);
   assert.doesNotMatch(sessionSync, /routingSessions\.forEach\(append\)/);
   assert.match(sessionSync, /const selectedDeviceSessionTitle = selectedVisibleSession/);
   assert.doesNotMatch(
@@ -583,7 +583,7 @@ test("Button-selected conversations are temporary and bound to status and input 
   assert.match(sessionSync, /const confirmedEmptyQueue = sessionsLoaded/);
   assert.match(
     sessionSync,
-    /const autoRoutingSession = explicitDshSessionRequired \? null : selectableSessions\[0\] \|\| routingSessions\?\.\[0\] \|\| sessions\?\.\[0\]/,
+    /const autoRoutingSession = explicitDshSessionRequired \? null : voiceSessions\[0\] \|\| routingSessions\?\.\[0\] \|\| sessions\?\.find\(\(session\) => session\?\.deviceCompanion !== true\)/,
   );
   assert.match(sessionSync, /const explicitDshSessionRequired = agentId === "deepseek-harness"/);
   assert.match(sessionSync, /const autoFollow = sessionId === "auto" && Boolean\(selectedRoutingSession\)/);

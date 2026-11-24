@@ -193,6 +193,30 @@ test("availability cache keeps the established refresh cadence outside Windows",
   });
 });
 
+test("listSessions reads the live TCodex home when it is newer than ~/.codex", async () => {
+  await withFakeHome({
+    sessions: {
+      "2026/08/10": { "rollout-old.jsonl": 86_400_000 },
+    },
+  }, async (home) => {
+    const liveDir = path.join(home, ".tcodex", "sessions", "2026", "11", "18");
+    fs.mkdirSync(liveDir, { recursive: true });
+    const liveFile = path.join(liveDir, "rollout-live.jsonl");
+    fs.writeFileSync(liveFile, `${JSON.stringify({
+      type: "session_meta",
+      payload: { id: "tcodex-live", cwd: "/repo" },
+    })}\n`);
+    const recent = (Date.now() - 5_000) / 1000;
+    fs.utimesSync(liveFile, recent, recent);
+    const logFile = path.join(home, ".tcodex", "logs_2.sqlite-wal");
+    fs.writeFileSync(logFile, "");
+    fs.utimesSync(logFile, recent, recent);
+    const sessions = await makeAdapter(home).listSessions();
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].id, "tcodex-live");
+  });
+});
+
 test("listSessions returns [] when ~/.codex/sessions does not exist", async () => {
   await withFakeHome(null, async (home) => {
     const a = makeAdapter(home);

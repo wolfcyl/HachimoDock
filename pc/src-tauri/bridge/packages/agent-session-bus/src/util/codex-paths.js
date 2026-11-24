@@ -10,6 +10,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { selectCodexDataDir } = require("../../../../agents/codex-home");
 const {
   isInternalCodexReviewText,
   isInternalCodexSession,
@@ -93,8 +94,10 @@ function mergeCodexSessionRecords(existing, incoming) {
  * @returns {string}
  */
 function codexSessionsRoot({ env = process.env } = {}) {
+  const explicit = env.CLAWD_CODEX_SESSION_DIR || env.CODEX_SESSION_DIR;
+  if (explicit && String(explicit).trim()) return String(explicit).trim();
   const home = env.CODEX_HOME || env.HOME || env.USERPROFILE || os.homedir();
-  return path.join(home, ".codex", "sessions");
+  return path.join(selectCodexDataDir(home), "sessions");
 }
 
 function codexSessionIndexPath({ env = process.env } = {}) {
